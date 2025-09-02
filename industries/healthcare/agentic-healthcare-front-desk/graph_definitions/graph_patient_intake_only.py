@@ -49,10 +49,6 @@ print("Your NVIDIA_API_KEY is set to: ", os.environ['NVIDIA_API_KEY'])
 assert os.environ['NVIDIA_API_KEY'] is not None, "Make sure you have your NVIDIA_API_KEY exported as a environment variable!"
 NVIDIA_API_KEY=os.getenv("NVIDIA_API_KEY", None)
 
-RIVA_API_URI = os.getenv("RIVA_API_URI", None)
-RIVA_ASR_FUNCTION_ID = os.getenv("RIVA_ASR_FUNCTION_ID", None)
-RIVA_TTS_FUNCTION_ID = os.getenv("RIVA_TTS_FUNCTION_ID", None)
-
 assert os.environ['LLM_MODEL'] is not None, "Make sure you have your LLM_MODEL exported as a environment variable!"
 llm_model = os.getenv("LLM_MODEL", None)
 
@@ -186,5 +182,5 @@ if __name__ == "__main__":
                             
     args = parser.parse_args()
     server_port = args.port
-    launch_demo_ui(intake_graph, server_port, NVIDIA_API_KEY, RIVA_ASR_FUNCTION_ID, RIVA_TTS_FUNCTION_ID, RIVA_API_URI)
+    launch_demo_ui(intake_graph, server_port, NVIDIA_API_KEY)
     
