@@ -64,7 +64,10 @@ def launch_demo_ui(assistant_graph, server_port, NVIDIA_API_KEY):
         latest_response = ""
         for event in events:
             return_print, latest_msg =  _print_event(event, _printed)
-            full_response += return_print
+            if full_response is not None:
+                full_response += return_print
+            else:
+                full_response = return_print
             if latest_msg != "":
                 latest_response = latest_msg
 

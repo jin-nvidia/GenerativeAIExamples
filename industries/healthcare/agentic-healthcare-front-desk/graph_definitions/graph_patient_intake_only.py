@@ -13,6 +13,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables.graph import MermaidDrawMethod
 
 
 from langgraph.graph.message import AnyMessage, add_messages
@@ -172,7 +173,7 @@ intake_graph = builder.compile(checkpointer=memory)
 if save_graph_to_png:
     
     with open("/graph_images/appgraph_patient_intake.png", "wb") as png:
-        png.write(intake_graph.get_graph(xray=True).draw_mermaid_png())
+        png.write(intake_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
 
 
 if __name__ == "__main__":
