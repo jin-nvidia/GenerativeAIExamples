@@ -6,20 +6,15 @@ An agentic healthcare front desk can assist patients and the healthcare professi
 
 The front desk assistant contains agentic LLM NIM with tools calling capabilities implemented in the LangGraph framework.
 
-Follow along this repository to see how you can create your own digital human for Healthcare front desk that combines NVIDIA NIM, ACE Microservices, RIVA ASR and TTS.
+Follow along this repository to see how you can create your own Healthcare front desk that combines NVIDIA NIM, RIVA ASR and RIVA TTS.
 
-We will offer two options for interacting with the agentic healthcare front desk: with a text / voice based Gradio UI or with a digital human avatar you can converse with.
-![](./images/repo_overview_structure_diagram.png)
+We will offer two options for interacting with the agentic healthcare front desk: with a text-based Gradio UI or with a voice-based web interface powered by [NVIDIA ace-controller](https://github.com/NVIDIA/ace-controller).
+
 
 > [!NOTE]  
-> Currently, there is a higher latency expected during LLM tool calling. Interaction with the agent could take a few seconds for non tool calling responses, and could take much higher (30+ seconds) for tool calling responses. If you're utilizing the NVIDIA AI Endpoints for the LLM, which is the default for this repo, latency can vary depending on the traffic to the endpoints. An improvement to this tool call latency issue is in development for the LLM NIMs, please stay tuned.
+> If you're utilizing the NVIDIA AI Endpoints for the LLM, which is the default for this repo, latency can vary depending on the traffic to the endpoints. 
 
-> [!IMPORTANT]
-> Integration with ACE is under active development and will be available soon.
 
-[NVIDIA ACE](https://developer.nvidia.com/ace) is a suite of real-time AI solutions for end-to-end development of interactive avatars and digital human applications at-scale. Its customizable microservices offer the fastest and most versatile solution for bringing avatars to life at-scale. The image below from the GitHub repository for `NIM Agent Blueprint: Digital Human for Customer Service` show the components in the ACE stack on the left side of the dotted line. The components shown on the right side of the dotted line starting from `Fast API` will be replaced by our own components in the agentic healthcare front desk.
-
-![](./images/ACE_diagram.png)
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -34,8 +29,8 @@ In this repository, we demonstrate the following:
 * A customer care agent in Langgraph for patient intake only. 
 * A customer care agent in Langgraph for appointment making only.
 * A customer care agent in Langgraph for medication lookup only.
-* A Gradio based UI that allows us to use voice or typing to converse with any of the four agents.
-* A chain server.
+* A Gradio based UI that allows us to use voice or typing in text to converse with any of the four agents.
+* A chain server that serves the graph via FastAPI.
 
 The agentic tool calling capability in each of the customer care assistants is powered by LLM NIMs - NVIDIA Inference Microservices. With the agentic capability, you can write your own tools to be utilized by LLMs.
 
@@ -83,7 +78,7 @@ e. Click **Copy Key** and then save the API key. The key begins with the letters
 
 ## Run Instructions
 
-As illustrated in the diagrams in the beginning, in this repo, we could run two types of applications, one is a FastAPI-based chain server, the other one is a simple voice/text Gradio UI for the healthcare agent. In this documentation, we will be showing how to use the Gradio UI, with instructions for connecting the chain server to ACE coming soon.
+As illustrated in the diagrams in the beginning, in this repo, we could run two types of applications, one is a FastAPI-based chain server, the other one is a simple text-based Gradio UI for the healthcare agent. In this documentation, we will be showing how to use the Gradio UI. For the steps to enable the voice-based interface powered by ace-controller, please see the [`healthcare_voice_agent`](https://github.com/NVIDIA/ace-controller/tree/develop/examples/healthcare_voice_agent) example in the [`ace-controller` repository](https://github.com/NVIDIA/ace-controller).
 
 Regardless of the type of application you'd like to run, first, please add your API Keys.
 
@@ -95,7 +90,7 @@ TAVILY_API_KEY="tvly-"
 ```
 Note the Tavily key is only required if you want to run the full graph or the medication lookup graph. Get your API Key from the [Tavily website](https://app.tavily.com/). This is used in the tool named `medication_instruction_search_tool` in [`graph.py`](./graph_definitions/graph.py) or [`graph_medication_lookup_only.py`](./graph_definitions/graph_medication_lookup_only.py).
 
-### 2. Running the simple voice/text Gradio UI
+### 2. Running the simple text Gradio UI
 To spin up a simple Gradio based web UI that allows us to converse with one of the agents via voice or typing, run one of these following services.
 
 ##### 2.1 The patient intake agent 
@@ -176,22 +171,8 @@ docker compose down medication-lookup-ui
 
 ##### 2.5 Launch the web UI
 
-Go to your web browser, here we have tested with Google Chrome, and type in `<your machine's ip address>:<port number>`. The port number would be `7860` by default, or your modified port number if you changed the port number in [docker-compose.yaml](./docker-compose.yaml). Please note that, before you can use your mic/speaker to interact with the web UI, you will need to enable the origin ([reference](https://github.com/NVIDIA/GenerativeAIExamples/blob/main/docs/using-sample-web-application.md#troubleshooting)):
-
-If you receive the following `"Media devices could not be accessed"` error message when you first attempt to transcribe a voice query, perform the following steps.
-
-1. Open another browser tab and enter `chrome://flags` in the location field.
-
-1. Enter `insecure origins treated as secure` in the search field.
-
-1. Enter `http://<host-ip>:7860` (or your own port number) in the text box and select **Enabled** from the menu.
-
-1. Click **Relaunch**.
-
-1. After the browser opens, grant `http://host-ip:7860` (or your own port number) access to your microphone.
-
-1. Retry your request on the web UI.
+Go to your web browser, here we have tested with Google Chrome, and type in `<your machine's ip address>:<port number>`. The port number would be `7860` by default, or your modified port number if you changed the port number in [docker-compose.yaml](./docker-compose.yaml). 
 
 ## Customization
-To customize for your own agentic LLM in LangGraph with your own tools, the [LangGraph tutorial on customer support](https://langchain-ai.github.io/langgraph/tutorials/customer-support/customer-support/) is helpful, where you'll find detailed explanations and steps of creating tools and agentic LLM in LangGraph. Afterwards, you can create your own file similar to the graph files in [`graph_definitions/`](./graph_definitions/) which can connect to the simple voice/text Gradio UI by calling [`launch_demo_ui`](./graph_definitions/graph_patient_intake_only.py#L184), or can be imported by the [chain server](./chain_server/chain_server.py#L31).
+To customize for your own agentic LLM in LangGraph with your own tools, the [LangGraph tutorial on customer support](https://langchain-ai.github.io/langgraph/tutorials/customer-support/customer-support/) is helpful, where you'll find detailed explanations and steps of creating tools and agentic LLM in LangGraph. Afterwards, you can create your own file similar to the graph files in [`graph_definitions/`](./graph_definitions/) which can connect to the simple text Gradio UI by calling [`launch_demo_ui`](./graph_definitions/graph_patient_intake_only.py#L184), or can be imported by the [chain server](./chain_server/chain_server.py#L31).
 
