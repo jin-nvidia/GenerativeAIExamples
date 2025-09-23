@@ -80,15 +80,47 @@ e. Click **Copy Key** and then save the API key. The key begins with the letters
 
 As illustrated in the diagrams in the beginning, in this repo, we could run two types of applications, one is a FastAPI-based chain server, the other one is a simple text-based Gradio UI for the healthcare agent. In this documentation, we will be showing how to use the Gradio UI. For the steps to enable the voice-based interface powered by ace-controller, please see the [`healthcare_voice_agent`](https://github.com/NVIDIA/ace-controller/tree/develop/examples/healthcare_voice_agent) example in the [`ace-controller` repository](https://github.com/NVIDIA/ace-controller).
 
-Regardless of the type of application you'd like to run, first, please add your API Keys.
 
-### 1. Add Your API keys Prior to Running
-In the file `vars.env`, add two API keys of your own:
-```
-NVIDIA_API_KEY="nvapi-" 
-TAVILY_API_KEY="tvly-"
-```
-Note the Tavily key is only required if you want to run the full graph or the medication lookup graph. Get your API Key from the [Tavily website](https://app.tavily.com/). This is used in the tool named `medication_instruction_search_tool` in [`graph.py`](./graph_definitions/graph.py) or [`graph_medication_lookup_only.py`](./graph_definitions/graph_medication_lookup_only.py).
+
+### 1. Edit the [vars.env](./vars.env) file to set environment variables
+It is required to configure each one of these environment variables before proceeding to run the applications.
+
+- `NVIDIA_API_KEY`
+
+    The `NVIDIA_API_KEY` is required. Please enter your own.
+
+
+- `TAVILY_API_KEY`
+
+    The Tavily key is only required if you want to run the full graph or the medication lookup graph. Get your API Key from the [Tavily website](https://app.tavily.com/). This is used in the tool named `medication_instruction_search_tool` in [`graph.py`](./graph_definitions/graph.py) or [`graph_medication_lookup_only.py`](./graph_definitions/graph_medication_lookup_only.py). If you are not running these two applications, leave the Tavily key empty.
+
+
+
+- `BASE_URL`
+
+    `BASE_URL` is set to the default value of `"https://integrate.api.nvidia.com/v1"`, which points to the public NVIDIA AI Endpoints. Enter your own URL for models hosted in your own server. This environment variable is used in the `ChatNVIDIA` API for defining the LLM to be used.
+
+- `LLM_MODEL`
+
+    This is set to the default value of `"meta/llama-3.3-70b-instruct"`. This environment variable is used in the `ChatNVIDIA` API for defining the LLM to be used. You can get a list of models that are known to support tool calling with,
+    ```
+    tool_models = [
+        model for model in ChatNVIDIA.get_available_models() if model.supports_tools
+    ]
+    ```
+
+
+- `NEMO_GUARDRAILS_CONFIG_PATH`
+
+    If `NEMO_GUARDRAILS_CONFIG_PATH` is not set, that implies the agent(s) will not be utilizing NeMo Guardrails. If you would like to utilize NeMo Guardrails for safeguarding your application, you can modify it to point to the path where your config files are. We provide a few examples of guardrails configuration under the directory [nmgr-config-store](./nmgr-config-store/). By default, this variable is set to `"nmgr-config-store/patient-intake-basic"`.
+
+- `LOG_LEVEL`
+
+    `LOG_LEVEL` indicates the level of logging intended. If set to `WARNING`, we will only see the most essential human and agent message logs. If set to `INFO` or `DEBUG`, we will see details logs of human and agent messages, as well as details logs of NeMo Guardrails. By default this is set to `WARNING`.
+
+- LangSmith configuration: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, and `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`
+
+    These four environment variables are entirely optional. They enable us to view the LangGraph application tracing in [Langsmith](https://smith.langchain.com/). If you would like to utilize LangSmith, please configure them for your own account. Otherwise, feel free to remove them. 
 
 ### 2. Running the simple text Gradio UI
 To spin up a simple Gradio based web UI that allows us to converse with one of the agents via voice or typing, run one of these following services.

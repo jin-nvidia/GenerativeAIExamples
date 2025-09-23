@@ -14,6 +14,13 @@ import uuid
 from uuid import uuid4
 import sys
 import os
+import logging
+
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level)
+
+logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -155,46 +162,48 @@ langgraph_config = {
     }
 }
 
-def _print_event(event: dict, _printed: set, max_length=1500):
-    return_print = ""
-    current_state = event.get("dialog_state")
-    if current_state:
-        print("Currently in: ", current_state[-1])
-        return_print += "Currently in: "
-        return_print += current_state[-1]
-        return_print += "\n"
-    message = event.get("messages")
-    latest_msg_chatbot = ""
-    if message:
-        if isinstance(message, list):
-            message = message[-1]
-        if message.id not in _printed:
-            msg_repr = message.pretty_repr()
-            msg_repr_chatbot = str(message.content)
-            if len(msg_repr) > max_length:
-                msg_repr = msg_repr[:max_length] + " ... (truncated)"
-                msg_repr_chatbot = msg_repr_chatbot[:max_length] + " ... (truncated)"
-            return_print += msg_repr
-            latest_msg_chatbot = msg_repr_chatbot
-            print(msg_repr)
-            _printed.add(message.id)
-    return_print += "\n"
-    return return_print, latest_msg_chatbot
+def print_event_stream(graph, input_message, thread_config, max_length=1500):
+    last_answer = ""
+    for event in graph.stream({"messages": [{"role": "user", "content": input_message}]}, thread_config, stream_mode="values"):
+        try:
+            for value in event.values():
+                try:
+                    if isinstance(value, list):
+                        value_messages = value[-1]
+                    else:
+                        value_messages = value
+                    logger.warning("Agent event: \n\n {}\n".format(value_messages.pretty_repr()))
+                    if value_messages.type == "ai":
+                        if value_messages.content == "" and value_messages.tool_calls:
+                            # this is an AI message with tool calls
+                            tool_name = value_messages.tool_calls[0]["name"].replace("_"," ").replace("-"," ")
+                            last_answer += "Agent is making a tool call with the tool {}. \n".format(tool_name)
+                        else:
+                            # this is an AI message without tool calls
+                            ret = value_messages.content
+                            if len(ret) > max_length:
+                                ret = ret[:max_length] + " ... (truncated)"
+                            last_answer += ret + "\n"
+                    elif value_messages.type == "tool":
+                        # this is a tool call message
+                        last_answer += "Tool call has finished. \n"
+                    elif value_messages.type == "human":
+                        pass
+                except Exception as ex:
+                    logger.exception("Agent response failed while iterating through values in event with exception: %s", ex)
+                    return "Error encountered, please see Docker logs for more details"
+                    
+        except Exception as ex:
+            logger.exception("Agent response failed while iterating through events in graph.astream with exception: %s", ex)
+            return "Error encountered, please see Docker logs for more details"
+            
+    return last_answer
 
-def example_llm_chain(query: str, chat_history: List["Message"], **kwargs) -> Generator[str, None, None]:
+def graph_chain(query: str, chat_history: List["Message"], **kwargs) -> Generator[str, None, None]:
         """Execute a Retrieval Augmented Generation chain using the components defined above."""
         
-        print("thread_id", langgraph_config["configurable"]["thread_id"])
-        
-        _printed = set()
-        events = assistant_graph.stream(
-            {"messages": ("user", query)}, langgraph_config, stream_mode="values"
-        )
-        latest_response = ""
-        for event in events:
-            return_print, latest_msg =  _print_event(event, _printed)
-            if latest_msg != "":
-                latest_response = latest_msg
+        logger.info("thread_id {}".format(langgraph_config["configurable"]["thread_id"]))
+        latest_response = print_event_stream(assistant_graph, query, langgraph_config, max_length=1500)
         yield latest_response
         
 
@@ -226,7 +235,7 @@ async def generate_answer(request: Request, prompt: Prompt) -> StreamingResponse
     try:
         generator = None
         # call llm_chain since we're not doing knowledge base
-        generator = example_llm_chain(query=last_user_message, chat_history=chat_history, **llm_settings)
+        generator = graph_chain(query=last_user_message, chat_history=chat_history, **llm_settings)
 
         def response_generator():
             """Convert generator streaming response into `data: ChainResponse` format for chunk 

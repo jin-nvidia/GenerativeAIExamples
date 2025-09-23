@@ -21,11 +21,13 @@ RUN apt autoremove -y curl software-properties-common
 
 
 # install dependencies
-RUN apt update &&  apt-get install -y python3-dev build-essential 
+RUN apt update &&  apt-get install -y python3-dev build-essential git
 RUN pip install --upgrade pip && pip install --upgrade setuptools
 COPY ./requirements.txt /opt/requirements.txt 
 RUN  pip3 install --no-cache-dir --use-pep517 -r /opt/requirements.txt
 
+RUN git clone https://github.com/NVIDIA/NeMo-Guardrails.git -b develop
+RUN cd NeMo-Guardrails && pip install -e .
 
 COPY ./ /app
 

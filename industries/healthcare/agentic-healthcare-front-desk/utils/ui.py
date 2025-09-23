@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple, Literal, Callable, Annotated, Literal, Optional
+from typing import Any, Dict, List, Tuple
 import uuid
 import sys 
 import os
@@ -7,8 +7,13 @@ import gradio as gr
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 from ui_assets.css.css import css, theme
+from utils.stream import print_event_async_stream
 
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level)
 
+logger = logging.getLogger(__name__)
 
 def get_config_with_new_thread_id():
     thread_id = str(uuid.uuid4())
@@ -18,64 +23,25 @@ def get_config_with_new_thread_id():
             "thread_id": thread_id,
         }
     }
+    logger.info("New config created with thread id: " + thread_id)
     return config
+
+
 
 def launch_demo_ui(assistant_graph, server_port, NVIDIA_API_KEY):
     # Establish a connection to the Riva server
-    _LOGGER = logging.getLogger()
-        
-
+   
     global config 
     config = get_config_with_new_thread_id()
+    async def interact(query: str, chat_history: List[Tuple[str, str]], full_response: str):
+        last_answer, added_log = await print_event_async_stream(assistant_graph, query, config, max_length=1500)
 
-    def _print_event(event: dict, _printed: set, max_length=1500):
-        return_print = ""
-        current_state = event.get("dialog_state")
-        if current_state:
-            print("Currently in: ", current_state[-1])
-            return_print += "Currently in: "
-            return_print += current_state[-1]
-            return_print += "\n"
-        message = event.get("messages")
-        latest_msg_chatbot = ""
-        if message:
-            if isinstance(message, list):
-                message = message[-1]
-            if message.id not in _printed:
-                msg_repr = message.pretty_repr()
-                msg_repr_chatbot = str(message.content)
-                if len(msg_repr) > max_length:
-                    msg_repr = msg_repr[:max_length] + " ... (truncated)"
-                    msg_repr_chatbot = msg_repr_chatbot[:max_length] + " ... (truncated)"
-                return_print += msg_repr
-                latest_msg_chatbot = msg_repr_chatbot
-                print(msg_repr)
-                _printed.add(message.id)
-        return_print += "\n"
-        return return_print, latest_msg_chatbot
-
-    def interact(query: str, chat_history: List[Tuple[str, str]], full_response: str):
-        _printed = set()
-        # example with a single tool call
-        events = assistant_graph.stream(
-            {"messages": ("user", query)}, config, stream_mode="values"
-        )
-        
-        latest_response = ""
-        for event in events:
-            return_print, latest_msg =  _print_event(event, _printed)
-            if full_response is not None:
-                full_response += return_print
-            else:
-                full_response = return_print
-            if latest_msg != "":
-                latest_response = latest_msg
-
-        yield "", chat_history + [[query, latest_response]], full_response, latest_response
+        yield "", chat_history + [[query, last_answer]], full_response + added_log, last_answer
 
     def new_thread():
         global config
         config = get_config_with_new_thread_id()
+        logger.info("Updated new thread id in config: " + config["configurable"]["thread_id"])
 
 
     with gr.Blocks(title = "Welcome to the Healthcare Contact Center", theme=theme, css=css) as demo:

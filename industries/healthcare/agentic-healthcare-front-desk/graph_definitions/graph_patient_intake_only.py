@@ -22,10 +22,16 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph, START
 
 import sys 
-from typing import Any, Dict, List, Tuple, Literal, Callable, Annotated, Literal, Optional
+from typing import Annotated
 from typing_extensions import TypedDict
 
 import argparse
+import logging
+
+from pydantic import Field
+
+from nemoguardrails import RailsConfig
+from nemoguardrails.integrations.langchain.runnable_rails import RunnableRails
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,12 +41,9 @@ from utils.ui import launch_demo_ui
 #################
 ### variables ###
 #################
-patient_id = '14867dba-fb11-4df3-9829-8e8e081b39e6' # test patient id from looking through https://launch.smarthealthit.org/
 save_graph_to_png = True
 
 env_var_file = "vars.env"
-
-
 #########################
 ### get env variables ###
 #########################
@@ -56,8 +59,17 @@ llm_model = os.getenv("LLM_MODEL", None)
 assert os.environ['BASE_URL'] is not None, "Make sure you have your BASE_URL exported as a environment variable!"
 base_url = os.getenv("BASE_URL", None)
 
+nemo_guardrails_config_path = os.getenv("NEMO_GUARDRAILS_CONFIG_PATH", None)
+
 ### define which llm to use
 assistant_llm = ChatNVIDIA(model=llm_model, base_url=base_url)
+
+# enable logging
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level)
+
+logger = logging.getLogger(__name__)
 
 ########################
 ### Define the tools ###
@@ -71,27 +83,38 @@ assistant_llm = ChatNVIDIA(model=llm_model, base_url=base_url)
 # to your own database.
 @tool
 def print_gathered_patient_info(
-    patient_name: str,
-    patient_dob: datetime.date,
-    allergies_medication: List[str],
-    current_symptoms: str,
-    current_symptoms_duration: str,
-    pharmacy_location: str
-):
+    patient_name: str = Field(description="Name of the patient"),
+    patient_dob: datetime.date = Field(description="Date of birth of the patient"),
+    current_medication: list[str] = Field(description="Current list of medications the patient is taking"),
+    allergies_medication: list[str] = Field(description="Medication allergies of the patient"),
+    current_symptoms: str = Field(description="Current symptoms of the patient"),
+    current_symptoms_duration: str = Field(description="Duration of the current symptoms in days, weeks, or months"),
+    pharmacy_location: str = Field(description="Location of the pharmacy")
+) -> str:
     """This function prints out and transmits the gathered information for each patient intake field:
      patient_name is the patient name,
      patient_dob is the patient date of birth,
+     current_medications is a list of current medications for the patient,
      allergies_medication is a list of allergies in medication for the patient,
      current_symptoms is a description of the current symptoms for the patient,
      current_symptoms_duration is the time duration of current symptoms,
      pharmacy_location is the patient pharmacy location. """
     
-    print(patient_name)
-    print(patient_dob)
-    print(allergies_medication)
-    print(current_symptoms)
-    print(current_symptoms_duration)
-    print(pharmacy_location)
+    # Process the input fields and generate output
+    output_message = f"""Here's a summary from the patient intake agent:
+    
+    Patient Name: {patient_name}
+    Patient Date of Birth: {patient_dob}
+    Current Medication: {current_medication}
+    Allergies Medication: {allergies_medication}
+    Current Symptoms: {current_symptoms}
+    Current Symptoms Duration: {current_symptoms_duration}
+    Pharmacy Location: {pharmacy_location}
+
+    The intake is now complete.
+    """
+    return output_message
+
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -111,15 +134,14 @@ class Assistant:
             ):
                 messages = state["messages"] + [("user", "Respond with a real output.")]
                 state = {**state, "messages": messages}
-                messages = state["messages"] + [("user", "Respond with a real output.")]
-                state = {**state, "messages": messages}
             else:
                 break
         return {"messages": result}
     
 
 # Patient Intake assistant
-with open('/app/graph_definitions/system_prompts/patient_intake_system_prompt.txt', 'r') as file:
+system_prompt_path = os.path.join(SCRIPT_DIR, "system_prompts", "patient_intake_system_prompt.txt")
+with open(system_prompt_path, 'r') as file:
     prompt = file.read()
 
 patient_intake_prompt = ChatPromptTemplate.from_messages(
@@ -128,9 +150,20 @@ patient_intake_prompt = ChatPromptTemplate.from_messages(
         ("placeholder", "{messages}"),
     ]
 )
-
 patient_intake_tools = [print_gathered_patient_info]
-patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools)
+
+if nemo_guardrails_config_path is not None:
+    # a path for the guardrails config files is provided in the environment variables
+    rails_config_path = os.path.join("/app", nemo_guardrails_config_path)
+    # load the guardrails config files
+    config = RailsConfig.from_path(rails_config_path)
+    # create the guardrails runnable
+    guardrails = RunnableRails(config=config, passthrough=True)
+    # create the patient intake runnable with the guardrails
+    patient_intake_runnable = patient_intake_prompt | ( guardrails | assistant_llm.bind_tools(patient_intake_tools) )
+else:
+    # no path for the guardrails config files is provided in the environment variables so we don't use guardrails
+    patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
 
 
 builder = StateGraph(State)
@@ -169,12 +202,17 @@ builder.add_edge("tools", "patient_intake_assistant")
 # this is a complete memory for the entire graph.
 memory = MemorySaver()
 intake_graph = builder.compile(checkpointer=memory)
+logger.info("Graph built successfully")
+
 
 if save_graph_to_png:
-    
-    with open("/graph_images/appgraph_patient_intake.png", "wb") as png:
-        png.write(intake_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
-
+    try:
+        save_image_path = os.path.join(SCRIPT_DIR, "graph_images", "appgraph_patient_intake.png")
+        with open(save_image_path, "wb") as png:
+            png.write(intake_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
+            logger.info(f"Graph PNG saved to {save_image_path}")
+    except Exception as ex:
+        logger.error(f"Error saving graph to PNG: {ex}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
