@@ -13,7 +13,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import ToolMessage
-from langchain_core.runnables.graph import MermaidDrawMethod
 
 
 from langgraph.graph.message import AnyMessage, add_messages
@@ -152,17 +151,24 @@ patient_intake_prompt = ChatPromptTemplate.from_messages(
 )
 patient_intake_tools = [print_gathered_patient_info]
 
-if nemo_guardrails_config_path is not None:
-    # a path for the guardrails config files is provided in the environment variables
-    rails_config_path = os.path.join("/app", nemo_guardrails_config_path)
-    # load the guardrails config files
-    config = RailsConfig.from_path(rails_config_path)
-    # create the guardrails runnable
-    guardrails = RunnableRails(config=config, passthrough=True)
-    # create the patient intake runnable with the guardrails
-    patient_intake_runnable = patient_intake_prompt | ( guardrails | assistant_llm.bind_tools(patient_intake_tools) )
+if nemo_guardrails_config_path is not None and nemo_guardrails_config_path is not "":
+    try:
+        # a path for the guardrails config files is provided in the environment variables
+        rails_config_path = os.path.join("/app", nemo_guardrails_config_path)
+        # load the guardrails config files
+        config = RailsConfig.from_path(rails_config_path)
+        # create the guardrails runnable
+        guardrails = RunnableRails(config=config, passthrough=True)
+        # create the patient intake runnable with the guardrails
+        patient_intake_runnable = patient_intake_prompt | ( guardrails | assistant_llm.bind_tools(patient_intake_tools) )
+        logger.warning(f"Guardrails config files loaded from path {nemo_guardrails_config_path}")
+    except Exception as ex:
+        logger.error(f"Error loading guardrails config files from path {nemo_guardrails_config_path}: {ex}")
+        logger.error("NeMo Guardrails will not be used. Standing up the patient intake agent without guardrails.")
+        patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
 else:
     # no path for the guardrails config files is provided in the environment variables so we don't use guardrails
+    logger.warning("Standing up the patient intake agent without NeMo Guardrails.")
     patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
 
 
@@ -207,9 +213,9 @@ logger.info("Graph built successfully")
 
 if save_graph_to_png:
     try:
-        save_image_path = os.path.join(SCRIPT_DIR, "graph_images", "appgraph_patient_intake.png")
+        save_image_path = os.path.join("/graph_images", "appgraph_patient_intake.png")
         with open(save_image_path, "wb") as png:
-            png.write(intake_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
+            png.write(intake_graph.get_graph(xray=True).draw_mermaid_png())
             logger.info(f"Graph PNG saved to {save_image_path}")
     except Exception as ex:
         logger.error(f"Error saving graph to PNG: {ex}")

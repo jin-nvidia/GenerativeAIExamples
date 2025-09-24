@@ -108,19 +108,18 @@ It is required to configure each one of these environment variables before proce
         model for model in ChatNVIDIA.get_available_models() if model.supports_tools
     ]
     ```
-
-
-- `NEMO_GUARDRAILS_CONFIG_PATH`
-
-    If `NEMO_GUARDRAILS_CONFIG_PATH` is not set, that implies the agent(s) will not be utilizing NeMo Guardrails. If you would like to utilize NeMo Guardrails for safeguarding your application, you can modify it to point to the path where your config files are. We provide a few examples of guardrails configuration under the directory [nmgr-config-store](./nmgr-config-store/). By default, this variable is set to `"nmgr-config-store/patient-intake-basic"`.
-
+    
 - `LOG_LEVEL`
 
     `LOG_LEVEL` indicates the level of logging intended. If set to `WARNING`, we will only see the most essential human and agent message logs. If set to `INFO` or `DEBUG`, we will see details logs of human and agent messages, as well as details logs of NeMo Guardrails. By default this is set to `WARNING`.
 
+- `NEMO_GUARDRAILS_CONFIG_PATH`
+
+    If `NEMO_GUARDRAILS_CONFIG_PATH` is not set, that implies the agent(s) will not be utilizing NeMo Guardrails. If you would like to utilize NeMo Guardrails for safeguarding your application, you can modify it to point to the path where your config files are. We provide a few examples of guardrails configuration under the directory [nmgr-config-store](./nmgr-config-store/). By default, this variable is not set.
+
 - LangSmith configuration: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, and `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`
 
-    These four environment variables are entirely optional. They enable us to view the LangGraph application tracing in [Langsmith](https://smith.langchain.com/). If you would like to utilize LangSmith, please configure them for your own account. Otherwise, feel free to remove them. 
+    These four environment variables are entirely optional. They enable us to view the LangGraph application tracing in [Langsmith](https://smith.langchain.com/). If you would like to utilize LangSmith, please configure them for your own account. Otherwise, feel free to remove them or leave them empty by default. 
 
 ### 2. Running the simple text Gradio UI
 To spin up a simple Gradio based web UI that allows us to converse with one of the agents via voice or typing, run one of these following services.
