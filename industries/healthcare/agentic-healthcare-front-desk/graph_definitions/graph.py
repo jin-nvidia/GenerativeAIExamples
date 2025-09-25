@@ -293,7 +293,7 @@ class Assistant:
 
     def __call__(self, state: State, config: RunnableConfig):
         while True:
-            result = self.runnable.invoke(state)
+            result = self.runnable.invoke(state, config)
 
             if not result.tool_calls and (
                 not result.content
