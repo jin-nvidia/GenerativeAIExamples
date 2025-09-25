@@ -186,7 +186,7 @@ Run the full agent comprising of three specialist agents.
 ```sh
 # build and run the container, add -d for detaching from logs
 docker compose up --build full-agent-ui
-# docker compose up --build -d full-agent-uifull-agent-ui
+# docker compose up --build -d full-agent-ui
 ```
 
 See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
