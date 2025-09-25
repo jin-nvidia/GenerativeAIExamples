@@ -16,11 +16,20 @@ async def print_event_async_stream(graph, input_message, thread_config, max_leng
                 logger.info("Logging raw event values: \n\n {}\n".format(value))
                 try:
                     if isinstance(value, list):
+                        if len(value) == 0:
+                            continue
                         value_messages = value[-1]
                     else:
                         value_messages = value
-                    logger.warning("Logging agent event: \n\n {}\n".format(value_messages.pretty_repr()))
-                    full_log += value_messages.pretty_repr() + "\n\n"
+                    if hasattr(value_messages, 'pretty_repr'):
+                        logger.warning("Agent event: \n\n {}\n".format(value_messages.pretty_repr()))
+                        full_log += value_messages.pretty_repr() + "\n\n"
+                    else:
+                        logger.warning("Agent event: \n\n {}\n".format(str(value_messages)))
+                        full_log += str(value_messages) + "\n\n"
+                        continue
+
+                    
                     if value_messages.type == "ai":
                         if value_messages.content == "" and value_messages.tool_calls:
                             # this is an AI message with tool calls

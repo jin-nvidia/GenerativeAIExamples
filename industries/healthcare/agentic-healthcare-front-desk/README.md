@@ -124,17 +124,32 @@ It is required to configure each one of these environment variables before proce
 ### 2. Running the simple text Gradio UI
 To spin up a simple Gradio based web UI that allows us to converse with one of the agents via voice or typing, run one of these following services.
 
+#### Automatic Reloading of Gradio UI Applications
+During development, it's often that we will need to reiterate on the system prompt, guardrails configuration, and environment variables for controlling application settings. For the purposes of quick iterations, we have enabled reloading of the uvicorn applications that are run inside the `patient-intake-ui`, `appointment-making-ui`, `full-agent-ui`, and `medication-lookup-ui` containers so we won't need to docker compose down and docker compose up again during these reiterations. The directories listed below are watched so that if any file of the types `"*.env", "*.txt", "*.co", "*.yml", "*.py"` changes within these directories/files, excluding any `__pycache__` directories, the Gradio UI applications restarts after the web browser tab is closed. 
+```sh
+graph_definitions/
+nmgr-config-store/
+vars.env
+```
+
+After you have done `docker compose up <container name>`, during your development, after changing a file in the directories above, you will need to **close** the web browser tab, and **open a new tab** to let the application reload, which takes about 10 seconds. Simply refreshing the browser tab will **not enable** the app reload.
+
 ##### 2.1 The patient intake agent 
 Run the patient intake only agent.
 
 ```sh
-# to run the container with the assumption we have done build:
-docker compose up -d patient-intake-ui
-# or to build at this command:
-docker compose up --build -d patient-intake-ui
+# build and run the container, add -d for detaching from logs
+docker compose up --build patient-intake-ui
+# docker compose up --build -d appointment-making-ui
 ```
+See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
+
+Next, find the application by going to `http://<your-machine-ip>:7860/patient-intake` in your browser.
+
 
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `patient-intake-ui` section and replace all mentions of 7860 with your own port number.
+
+
 
 [Launch the web UI](#25-launch-the-web-ui) on your Chrome browser, you should see this interface:
 ![](./images/example_ui.png)
@@ -148,11 +163,15 @@ docker compose down patient-intake-ui
 ##### 2.2 The appointment making agent 
 Run the appointment making only agent.
 ```sh
-# to run the container with the assumption we have done build:
-docker compose up -d appointment-making-ui
-# or to build at this command:
-docker compose up --build -d appointment-making-ui
+# build and run the container, add -d for detaching from logs
+docker compose up --build appointment-making-ui
+# docker compose up --build -d appointment-making-ui
 ```
+
+See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
+
+
+Next, find the application by going to `http://<your-machine-ip>:7860/appointment-making` in your browser.
 
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `appointment-making-ui` section and replace all mentions of 7860 with your own port number.
 
@@ -166,10 +185,9 @@ docker compose down appointment-making-ui
 ##### 2.3 The full agent 
 Run the full agent comprising of three specialist agents.
 ```sh
-# to run the container with the assumption we have done build:
-docker compose up -d full-agent-ui
-# or to build at this command:
-docker compose up --build -d full-agent-ui
+# build and run the container, add -d for detaching from logs
+docker compose up --build full-agent-ui
+# docker compose up --build -d appointment-making-ui
 ```
 
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `full-agent-ui` section and replace all mentions of 7860 with your own port number.
@@ -184,13 +202,12 @@ docker compose down full-agent-ui
 ##### 2.4 The medication lookup agent 
 Run the medication lookup only agent.
 
-```sh
-# to run the container with the assumption we have done build:
-docker compose up -d medication-lookup-ui
-# or to build at this command:
-docker compose up --build -d medication-lookup-ui
-```
 
+```sh
+# build and run the container, add -d for detaching from logs
+docker compose up --build medication-lookup-ui
+# docker compose up --build -d appointment-making-ui
+```
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `medication-lookup-ui` section and replace all mentions of 7860 with your own port number.
 
 [Launch the web UI](#25-launch-the-web-ui) on your Chrome browser, you should see the same web interface as above.
@@ -199,6 +216,8 @@ To bring down the medication lookup UI:
 ```sh
 docker compose down medication-lookup-ui
 ```
+Next, find the application by going to `http://<your-machine-ip>:7860/medication-lookup` in your browser.
+
 
 ##### 2.5 Launch the web UI
 
@@ -207,3 +226,29 @@ Go to your web browser, here we have tested with Google Chrome, and type in `<yo
 ## Customization
 To customize for your own agentic LLM in LangGraph with your own tools, the [LangGraph tutorial on customer support](https://langchain-ai.github.io/langgraph/tutorials/customer-support/customer-support/) is helpful, where you'll find detailed explanations and steps of creating tools and agentic LLM in LangGraph. Afterwards, you can create your own file similar to the graph files in [`graph_definitions/`](./graph_definitions/) which can connect to the simple text Gradio UI by calling [`launch_demo_ui`](./graph_definitions/graph_patient_intake_only.py#L184), or can be imported by the [chain server](./chain_server/chain_server.py#L31).
 
+### 3. Serving Via FastAPI
+Serve one of the agents via a FastAPI server for connection to other services.
+
+#### Automatic Reloading of FastAPI Application
+During development, it's often that we will need to reiterate on the python files, system prompt, guardrails configuration, and environment variables for controlling application settings. For the purposes of quick iterations, we have enabled reloading of the uvicorn applications for the `chain-server` so we won't need to docker compose down and docker compose up again during these reiterations. The directories listed below are watched so that if any file of the types `"*.env", "*.txt", "*.co", "*.yml", "*.py"` changes within these directories/files, excluding any `__pycache__` directories, the chain server application restarts. 
+```sh
+graph_definitions/
+chain_server/
+nmgr-config-store/
+vars.env
+```
+
+#### Launch the FastAPI Chain Server
+First go to the [docker-compose.yaml](./docker-compose.yaml) file, the command for the `chain-server` service: `python3 chain_server/chain_server.py --assistant intake --port 8081` indicates the patient intake agent will be utilized in the chain server. You can choose to specify any one of the four available options for `--assistant`: "intake", "appointment", "medication", or "full". 
+
+Then bring up the chain-server container:
+```sh
+# build and run the container, add -d for detaching from logs
+docker compose up --build chain-server
+# docker compose up --build -d chain-server
+```
+
+When you're ready to bring it down:
+```
+docker compose up --build chain-server
+```

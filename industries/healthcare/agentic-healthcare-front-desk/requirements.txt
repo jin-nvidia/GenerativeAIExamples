@@ -14,3 +14,4 @@ fhirclient==4.2.0
 python-dotenv==1.0.1
 pycountry==23.12.11
 bleach==6.1.0
+watchfiles==1.1.0

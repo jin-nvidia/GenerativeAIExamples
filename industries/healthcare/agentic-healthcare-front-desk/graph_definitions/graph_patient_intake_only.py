@@ -32,6 +32,9 @@ from pydantic import Field
 from nemoguardrails import RailsConfig
 from nemoguardrails.integrations.langchain.runnable_rails import RunnableRails
 
+from fastapi import FastAPI
+import gradio as gr
+import uvicorn
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -42,27 +45,33 @@ from utils.ui import launch_demo_ui
 #################
 save_graph_to_png = True
 
-env_var_file = "vars.env"
-#########################
-### get env variables ###
-#########################
-load_dotenv(env_var_file)  # This line brings all environment variables from vars.env into os.environ
-print("Your NVIDIA_API_KEY is set to: ", os.environ['NVIDIA_API_KEY'])
+env_var_file = "/env_vars/vars.env"
 
-assert os.environ['NVIDIA_API_KEY'] is not None, "Make sure you have your NVIDIA_API_KEY exported as a environment variable!"
-NVIDIA_API_KEY=os.getenv("NVIDIA_API_KEY", None)
+def load_env_variables():
+    """Load environment variables from vars.env file and return configuration"""
+    #########################
+    ### get env variables ###
+    #########################
+    load_dotenv(env_var_file, override=True)  # This line brings all environment variables from vars.env into os.environ
+    print("Your NVIDIA_API_KEY is set to: ", os.environ['NVIDIA_API_KEY'])
 
-assert os.environ['LLM_MODEL'] is not None, "Make sure you have your LLM_MODEL exported as a environment variable!"
-llm_model = os.getenv("LLM_MODEL", None)
+    assert os.environ['NVIDIA_API_KEY'] is not None, "Make sure you have your NVIDIA_API_KEY exported as a environment variable!"
+    nvidia_api_key = os.getenv("NVIDIA_API_KEY", None)
 
-assert os.environ['BASE_URL'] is not None, "Make sure you have your BASE_URL exported as a environment variable!"
-base_url = os.getenv("BASE_URL", None)
+    assert os.environ['LLM_MODEL'] is not None, "Make sure you have your LLM_MODEL exported as a environment variable!"
+    llm_model = os.getenv("LLM_MODEL", None)
 
-nemo_guardrails_config_path = os.getenv("NEMO_GUARDRAILS_CONFIG_PATH", None)
+    assert os.environ['BASE_URL'] is not None, "Make sure you have your BASE_URL exported as a environment variable!"
+    base_url = os.getenv("BASE_URL", None)
 
-### define which llm to use
-assistant_llm = ChatNVIDIA(model=llm_model, base_url=base_url)
+    nemo_guardrails_config_path = os.getenv("NEMO_GUARDRAILS_CONFIG_PATH", None)
 
+    return {
+        'nvidia_api_key': nvidia_api_key,
+        'llm_model': llm_model,
+        'base_url': base_url,
+        'nemo_guardrails_config_path': nemo_guardrails_config_path
+    }
 # enable logging
 log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
@@ -138,42 +147,6 @@ class Assistant:
         return {"messages": result}
     
 
-# Patient Intake assistant
-system_prompt_path = os.path.join(SCRIPT_DIR, "system_prompts", "patient_intake_system_prompt.txt")
-with open(system_prompt_path, 'r') as file:
-    prompt = file.read()
-
-patient_intake_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", prompt),
-        ("placeholder", "{messages}"),
-    ]
-)
-patient_intake_tools = [print_gathered_patient_info]
-
-if nemo_guardrails_config_path is not None and nemo_guardrails_config_path is not "":
-    try:
-        # a path for the guardrails config files is provided in the environment variables
-        rails_config_path = os.path.join("/app", nemo_guardrails_config_path)
-        # load the guardrails config files
-        config = RailsConfig.from_path(rails_config_path)
-        # create the guardrails runnable
-        guardrails = RunnableRails(config=config, passthrough=True)
-        # create the patient intake runnable with the guardrails
-        patient_intake_runnable = patient_intake_prompt | ( guardrails | assistant_llm.bind_tools(patient_intake_tools) )
-        logger.warning(f"Guardrails config files loaded from path {nemo_guardrails_config_path}")
-    except Exception as ex:
-        logger.error(f"Error loading guardrails config files from path {nemo_guardrails_config_path}: {ex}")
-        logger.error("NeMo Guardrails will not be used. Standing up the patient intake agent without guardrails.")
-        patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
-else:
-    # no path for the guardrails config files is provided in the environment variables so we don't use guardrails
-    logger.warning("Standing up the patient intake agent without NeMo Guardrails.")
-    patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
-
-
-builder = StateGraph(State)
-
 def handle_tool_error(state) -> dict:
     error = state.get("error")
     tool_calls = state["messages"][-1].tool_calls
@@ -192,40 +165,113 @@ def create_tool_node_with_fallback(tools: list) -> dict:
         [RunnableLambda(handle_tool_error)], exception_key="error"
     )
 
-# Define nodes: these do the work
-builder.add_node("patient_intake_assistant", Assistant(patient_intake_runnable))
-builder.add_node("tools", create_tool_node_with_fallback(patient_intake_tools))
-# Define edges: these determine how the control flow moves
-builder.add_edge(START, "patient_intake_assistant")
-builder.add_conditional_edges(
-    "patient_intake_assistant",
-    tools_condition,
-)
-builder.add_edge("tools", "patient_intake_assistant")
+def create_intake_graph():
+    """Create and return a fresh instance of the intake graph"""
+    # Reload environment variables from vars.env
+    env_config = load_env_variables()
+    
+    # Create fresh LLM instance with reloaded config
+    assistant_llm = ChatNVIDIA(
+        model=env_config['llm_model'], 
+        base_url=env_config['base_url']
+    )
+    
+    # Recreate patient intake runnable with fresh LLM and guardrails config
+    system_prompt_path = os.path.join(SCRIPT_DIR, "system_prompts", "patient_intake_system_prompt.txt")
+    with open(system_prompt_path, 'r') as file:
+        prompt = file.read()
 
+    patient_intake_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", prompt),
+            ("placeholder", "{messages}"),
+        ]
+    )
+    patient_intake_tools = [print_gathered_patient_info]
 
-# The checkpointer lets the graph persist its state
-# this is a complete memory for the entire graph.
-memory = MemorySaver()
-intake_graph = builder.compile(checkpointer=memory)
-logger.info("Graph built successfully")
+    if env_config['nemo_guardrails_config_path'] is not None and env_config['nemo_guardrails_config_path'] != "":
+        try:
+            # a path for the guardrails config files is provided in the environment variables
+            rails_config_path = os.path.join("/app", env_config['nemo_guardrails_config_path'])
+            # load the guardrails config files
+            config = RailsConfig.from_path(rails_config_path)
+            # create the guardrails runnable
+            guardrails = RunnableRails(config=config, passthrough=True)
+            # create the patient intake runnable with the guardrails
+            patient_intake_runnable = patient_intake_prompt | ( guardrails | assistant_llm.bind_tools(patient_intake_tools) )
+            logger.warning(f"Guardrails config files loaded from path {env_config['nemo_guardrails_config_path']}")
+        except Exception as ex:
+            logger.error(f"Error loading guardrails config files from path {env_config['nemo_guardrails_config_path']}: {ex}")
+            logger.error("NeMo Guardrails will not be used. Standing up the patient intake agent without guardrails.")
+            patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
+    else:
+        # no path for the guardrails config files is provided in the environment variables so we don't use guardrails
+        logger.warning("Standing up the patient intake agent without NeMo Guardrails.")
+        patient_intake_runnable = patient_intake_prompt | assistant_llm.bind_tools(patient_intake_tools) 
+
+    # Create a fresh StateGraph builder
+    builder = StateGraph(State)
+    
+    # Define nodes: these do the work
+    builder.add_node("patient_intake_assistant", Assistant(patient_intake_runnable))
+    builder.add_node("tools", create_tool_node_with_fallback(patient_intake_tools))
+    
+    # Define edges: these determine how the control flow moves
+    builder.add_edge(START, "patient_intake_assistant")
+    builder.add_conditional_edges(
+        "patient_intake_assistant",
+        tools_condition,
+    )
+    builder.add_edge("tools", "patient_intake_assistant")
+    
+    # The checkpointer lets the graph persist its state
+    # this is a complete memory for the entire graph.
+    memory = MemorySaver()
+    graph = builder.compile(checkpointer=memory)
+    logger.info("Graph built successfully")
+    return graph
+
+# Create initial graph instance for backwards compatibility
+intake_graph = create_intake_graph()
 
 
 if save_graph_to_png:
     try:
-        save_image_path = os.path.join("/graph_images", "appgraph_patient_intake.png")
+        save_image_path = "/graph_images/appgraph_patient_intake.png"
         with open(save_image_path, "wb") as png:
             png.write(intake_graph.get_graph(xray=True).draw_mermaid_png())
             logger.info(f"Graph PNG saved to {save_image_path}")
     except Exception as ex:
         logger.error(f"Error saving graph to PNG: {ex}")
 
+
+demo = launch_demo_ui(intake_graph)
+
+app = FastAPI()
+@app.get("/")
+def app_main():
+    return {"message": "This is your main app"}
+app = gr.mount_gradio_app(app, demo, path="/patient-intake")
+
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860,
-                        help = "Specify the port number for the simple voice UI to run at.")
+                        help = "Specify the port number for the simple Gradio UI to run at.")
                             
     args = parser.parse_args()
     server_port = args.port
-    launch_demo_ui(intake_graph, server_port, NVIDIA_API_KEY)
+
     
+    uvicorn.run("graph_patient_intake_only:app", 
+                host="0.0.0.0", 
+                port=server_port, 
+                reload=True, 
+                reload_includes=["*.env", "*.txt", "*.co", "*.yml", "*.py"],
+                reload_excludes=["**/__pycache__/**"],
+                reload_dirs=[
+                    "/app/graph_definitions",
+                    "/app/nmgr-config-store",
+                    "/env_vars"
+
+                ])

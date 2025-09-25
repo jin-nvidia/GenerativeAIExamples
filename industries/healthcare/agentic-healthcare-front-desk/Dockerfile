@@ -3,6 +3,8 @@ ARG BASE_IMAGE_TAG=22.04_20240212
 
 FROM ${BASE_IMAGE_URL}:${BASE_IMAGE_TAG}
 
+
+
 ENV DEBIAN_FRONTEND noninteractive
 # Install required ubuntu packages for setting up python 3.10
 RUN apt update && \
@@ -26,12 +28,12 @@ RUN pip install --upgrade pip && pip install --upgrade setuptools
 COPY ./requirements.txt /opt/requirements.txt 
 RUN  pip3 install --no-cache-dir --use-pep517 -r /opt/requirements.txt
 
-RUN git clone https://github.com/NVIDIA/NeMo-Guardrails.git -b develop
-RUN cd NeMo-Guardrails && pip install -e .
-
-COPY ./ /app
+RUN git clone https://github.com/NVIDIA-NeMo/Guardrails.git -b develop
+RUN cd Guardrails && pip install -e .
 
 WORKDIR /app
 
-#ENTRYPOINT ["python", "chain_server.py"]
+COPY ./ /app
+
+
 

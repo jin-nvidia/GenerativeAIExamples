@@ -28,7 +28,7 @@ def get_config_with_new_thread_id():
 
 
 
-def launch_demo_ui(assistant_graph, server_port, NVIDIA_API_KEY):
+def launch_demo_ui(assistant_graph):
     # Establish a connection to the Riva server
    
     global config 
@@ -90,17 +90,7 @@ def launch_demo_ui(assistant_graph, server_port, NVIDIA_API_KEY):
         msg.submit(interact, [msg, chatbot, full_response], [msg, chatbot, full_response, latest_response])
         submit_btn.click(interact, [msg, chatbot, full_response], [msg, chatbot, full_response, latest_response])
 
-        new_thread_btn.click(new_thread, [],[])
+        new_thread_btn.click(new_thread)
 
-        
-
-    demo.queue().launch(
-        server_name="0.0.0.0", 
-        server_port=server_port,
-        favicon_path="ui_assets/css/faviconV2.png",
-        allowed_paths=[
-            "ui_assets/fonts/NVIDIASansWebWOFFFontFiles/WOFF2/NVIDIASans_W_Rg.woff2",
-            "ui_assets/fonts/NVIDIASansWebWOFFFontFiles/WOFF2/NVIDIASans_W_Bd.woff2",
-            "ui_assets/fonts/NVIDIASansWebWOFFFontFiles/WOFF2/NVIDIASans_W_It.woff2",
-        ]
-    )
+    return demo
+    

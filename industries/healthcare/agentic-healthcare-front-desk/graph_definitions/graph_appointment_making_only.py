@@ -27,10 +27,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph, START
 
 import sys 
-from typing import Any, Dict, List, Tuple, Literal, Callable, Annotated, Literal, Optional
+from typing import Annotated
 from typing_extensions import TypedDict
 
 import argparse
+import logging
+
+from nemoguardrails import RailsConfig
+from nemoguardrails.integrations.langchain.runnable_rails import RunnableRails
+
+from fastapi import FastAPI
+import gradio as gr
+import uvicorn
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR)) 
@@ -42,31 +50,43 @@ from utils.ui import launch_demo_ui
 patient_id = '14867dba-fb11-4df3-9829-8e8e081b39e6' # test patient id from looking through https://launch.smarthealthit.org/
 save_graph_to_png = True
 
-env_var_file = "vars.env"
+env_var_file = "/env_vars/vars.env"
 
 local_file_constant = "sample_db/test_db.sqlite"
 local_file_current = "sample_db/test_db_tmp_copy.sqlite"
 
+def load_env_variables():
+    """Load environment variables from vars.env file and return configuration"""
+    #########################
+    ### get env variables ###
+    #########################
+    load_dotenv(env_var_file, override=True)  # This line brings all environment variables from vars.env into os.environ
+    print("Your NVIDIA_API_KEY is set to: ", os.environ['NVIDIA_API_KEY'])
 
+    assert os.environ['NVIDIA_API_KEY'] is not None, "Make sure you have your NVIDIA_API_KEY exported as a environment variable!"
+    nvidia_api_key = os.getenv("NVIDIA_API_KEY", None)
 
-#########################
-### get env variables ###
-#########################
-load_dotenv(env_var_file)  # This line brings all environment variables from vars.env into os.environ
-print("Your NVIDIA_API_KEY is set to: ", os.environ['NVIDIA_API_KEY'])
+    assert os.environ['LLM_MODEL'] is not None, "Make sure you have your LLM_MODEL exported as a environment variable!"
+    llm_model = os.getenv("LLM_MODEL", None)
 
-assert os.environ['NVIDIA_API_KEY'] is not None, "Make sure you have your NVIDIA_API_KEY exported as a environment variable!"
+    assert os.environ['BASE_URL'] is not None, "Make sure you have your BASE_URL exported as a environment variable!"
+    base_url = os.getenv("BASE_URL", None)
 
-NVIDIA_API_KEY=os.getenv("NVIDIA_API_KEY", None)
+    nemo_guardrails_config_path = os.getenv("NEMO_GUARDRAILS_CONFIG_PATH", None)
 
-assert os.environ['LLM_MODEL'] is not None, "Make sure you have your LLM_MODEL exported as a environment variable!"
-llm_model = os.getenv("LLM_MODEL", None)
+    return {
+        'nvidia_api_key': nvidia_api_key,
+        'llm_model': llm_model,
+        'base_url': base_url,
+        'nemo_guardrails_config_path': nemo_guardrails_config_path
+    }
 
-assert os.environ['BASE_URL'] is not None, "Make sure you have your BASE_URL exported as a environment variable!"
-base_url = os.getenv("BASE_URL", None)
+# enable logging
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level)
 
-### define which llm to use
-assistant_llm = ChatNVIDIA(model=llm_model, base_url=base_url)
+logger = logging.getLogger(__name__)
 
 ########################
 ### Define the tools ###
@@ -105,13 +125,11 @@ def find_available_appointments(
 ) -> list:
     """Look for available new appointments."""
     
-    
     shutil.copyfile(local_file_constant, local_file_current)
 
     conn = sqlite3.connect(local_file_current)
     
     query_datetime = "SELECT * from appointment_schedule WHERE appointment_type = \"{}\" AND patient IS NULL ".format(appointment_type.value)
-
 
     #start_date, end_date = datetime.date.fromisoformat(start_date), datetime.date.fromisoformat(end_date)
     if start_date:
@@ -150,12 +168,12 @@ def book_appointment(
     cur.close()
     conn.close()
         
-    
     return current_patient_entries
 
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
+
 class Assistant:
     def __init__(self, runnable: Runnable):
         self.runnable = runnable
@@ -171,38 +189,10 @@ class Assistant:
             ):
                 messages = state["messages"] + [("user", "Respond with a real output.")]
                 state = {**state, "messages": messages}
-                messages = state["messages"] + [("user", "Respond with a real output.")]
-                state = {**state, "messages": messages}
             else:
                 break
         return {"messages": result}
 
-with open('/app/graph_definitions/system_prompts/appointment_system_prompt.txt', 'r') as file:
-    guidelines_for_scheduling_appointment = file.read()
-
-appointment_prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a helpful customer support assistant for healthcare appointment scheduling. Your purpose is to help patients with looking up and making appointments."
-            "Use the provided tools as necessary."
-            "\nCurrent date and time: {time}."
-            "\nGuidelines for scheduling appointments: {guidelines_for_scheduling_appointment}."
-        ),
-        ("placeholder", "{messages}"),
-    ]
-).partial(time=datetime.datetime.now(), guidelines_for_scheduling_appointment=guidelines_for_scheduling_appointment)
-
-appointment_tools = [find_available_appointments, book_appointment]
-# appointment_assistant_runnable = appointment_assistant_prompt | llm
-appointment_runnable = appointment_prompt | assistant_llm.bind_tools(
-    appointment_tools 
-)
-
-
-
-
-builder = StateGraph(State)
 
 def handle_tool_error(state) -> dict:
     error = state.get("error")
@@ -222,37 +212,117 @@ def create_tool_node_with_fallback(tools: list) -> dict:
         [RunnableLambda(handle_tool_error)], exception_key="error"
     )
 
-# Appointment assistant
-# Define nodes: these do the work
-builder.add_node("appointment_assistant", Assistant(appointment_runnable))
-builder.add_node("tools", create_tool_node_with_fallback(appointment_tools))
-# Define edges: these determine how the control flow moves
-builder.add_edge(START, "appointment_assistant")
-builder.add_conditional_edges(
-    "appointment_assistant",
-    tools_condition,
-)
-builder.add_edge("tools", "appointment_assistant")
+def create_appointment_graph():
+    """Create and return a fresh instance of the appointment graph"""
+    # Reload environment variables from vars.env
+    env_config = load_env_variables()
+    
+    # Create fresh LLM instance with reloaded config
+    assistant_llm = ChatNVIDIA(
+        model=env_config['llm_model'], 
+        base_url=env_config['base_url']
+    )
+    
+    # Recreate appointment runnable with fresh LLM and guardrails config
+    system_prompt_path = os.path.join(SCRIPT_DIR, "system_prompts", "appointment_system_prompt.txt")
+    with open(system_prompt_path, 'r') as file:
+        guidelines_for_scheduling_appointment = file.read()
 
-# Compile graph
-memory = MemorySaver()
-appt_graph = builder.compile(
-    checkpointer=memory,    
-)
+    appointment_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful customer support assistant for healthcare appointment scheduling. Your purpose is to help patients with looking up and making appointments."
+                "Use the provided tools as necessary."
+                "\nCurrent date and time: {time}."
+                "\nGuidelines for scheduling appointments: {guidelines_for_scheduling_appointment}."
+            ),
+            ("placeholder", "{messages}"),
+        ]
+    ).partial(time=datetime.datetime.now(), guidelines_for_scheduling_appointment=guidelines_for_scheduling_appointment)
+
+    appointment_tools = [find_available_appointments, book_appointment]
+
+    if env_config['nemo_guardrails_config_path'] is not None and env_config['nemo_guardrails_config_path'] != "":
+        try:
+            # a path for the guardrails config files is provided in the environment variables
+            rails_config_path = os.path.join("/app", env_config['nemo_guardrails_config_path'])
+            # load the guardrails config files
+            config = RailsConfig.from_path(rails_config_path)
+            # create the guardrails runnable
+            guardrails = RunnableRails(config=config, passthrough=True)
+            # create the appointment runnable with the guardrails
+            appointment_runnable = appointment_prompt | ( guardrails | assistant_llm.bind_tools(appointment_tools) )
+            logger.warning(f"Guardrails config files loaded from path {env_config['nemo_guardrails_config_path']}")
+        except Exception as ex:
+            logger.error(f"Error loading guardrails config files from path {env_config['nemo_guardrails_config_path']}: {ex}")
+            logger.error("NeMo Guardrails will not be used. Standing up the appointment agent without guardrails.")
+            appointment_runnable = appointment_prompt | assistant_llm.bind_tools(appointment_tools) 
+    else:
+        # no path for the guardrails config files is provided in the environment variables so we don't use guardrails
+        logger.warning("Standing up the appointment agent without NeMo Guardrails.")
+        appointment_runnable = appointment_prompt | assistant_llm.bind_tools(appointment_tools)
+
+    # Create a fresh StateGraph builder
+    builder = StateGraph(State)
+    
+    # Define nodes: these do the work
+    builder.add_node("appointment_assistant", Assistant(appointment_runnable))
+    builder.add_node("tools", create_tool_node_with_fallback(appointment_tools))
+    
+    # Define edges: these determine how the control flow moves
+    builder.add_edge(START, "appointment_assistant")
+    builder.add_conditional_edges(
+        "appointment_assistant",
+        tools_condition,
+    )
+    builder.add_edge("tools", "appointment_assistant")
+    
+    # The checkpointer lets the graph persist its state
+    # this is a complete memory for the entire graph.
+    memory = MemorySaver()
+    graph = builder.compile(checkpointer=memory)
+    logger.info("Appointment graph built successfully")
+    return graph
+
+# Create initial graph instance for backwards compatibility
+appt_graph = create_appointment_graph()
 
 if save_graph_to_png:
-    
-    with open("/graph_images/appgraph_appointment.png", "wb") as png:
-        png.write(appt_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
+    try:
+        save_image_path = "/graph_images/appgraph_appointment.png"
+        with open(save_image_path, "wb") as png:
+            png.write(appt_graph.get_graph(xray=True).draw_mermaid_png(draw_method=MermaidDrawMethod.API))
+            logger.info(f"Graph PNG saved to {save_image_path}")
+    except Exception as ex:
+        logger.error(f"Error saving graph to PNG: {ex}")
+
+demo = launch_demo_ui(appt_graph)
+
+app = FastAPI()
+@app.get("/")
+def app_main():
+    return {"message": "This is your main app"}
+app = gr.mount_gradio_app(app, demo, path="/appointment-making")
 
 if __name__ == "__main__":
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860,
-                        help = "Specify the port number for the simple voice UI to run at.")
+                        help = "Specify the port number for the simple Gradio UI to run at.")
                             
     args = parser.parse_args()
     server_port = args.port
-    launch_demo_ui(appt_graph, server_port, NVIDIA_API_KEY)
     
+    uvicorn.run("graph_appointment_making_only:app", 
+                host="0.0.0.0", 
+                port=server_port, 
+                reload=True, 
+                reload_includes=["*.env", "*.txt", "*.co", "*.yml", "*.py"],
+                reload_excludes=["**/__pycache__/**"],
+                reload_dirs=[
+                    "/app/graph_definitions",
+                    "/app/nmgr-config-store",
+                    "/env_vars"
 
-
+                ])

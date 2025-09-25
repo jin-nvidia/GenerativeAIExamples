@@ -15,6 +15,7 @@ from uuid import uuid4
 import sys
 import os
 import logging
+import importlib
 
 log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
@@ -35,25 +36,56 @@ parser.add_argument("--port", type=int, default=8081,
                     help = "Specify the port number for the chain server to run at.")
                         
 args = parser.parse_args()
-if args.assistant == "full":
-    from graph_definitions.graph import full_graph
-    assistant_graph = full_graph
-elif args.assistant == "intake":
-    from graph_definitions.graph_patient_intake_only import intake_graph
-    assistant_graph = intake_graph
-elif args.assistant == "appointment":
-    from graph_definitions.graph_appointment_making_only import appt_graph
-    assistant_graph = appt_graph
-elif args.assistant == "medication":
-    from graph_definitions.graph_medication_lookup_only import medication_lookup_graph
-    assistant_graph = medication_lookup_graph
-else:
-    raise Exception("We must specify one of the three options for assistant: full, intake or appointment.")
-
 port = args.port
 
+# Cache for the assistant graph to avoid rebuilding on every request
+_cached_assistant_graph = None
+
+def _load_assistant_graph():
+    """Load and return the assistant graph"""
+    logger.info("Loading assistant graph...")
+    
+    if args.assistant == "full":
+        import graph_definitions.graph
+        importlib.reload(graph_definitions.graph)
+        from graph_definitions.graph import create_full_graph
+        return create_full_graph()
+    elif args.assistant == "intake":
+        import graph_definitions.graph_patient_intake_only
+        importlib.reload(graph_definitions.graph_patient_intake_only)
+        from graph_definitions.graph_patient_intake_only import create_intake_graph
+        return create_intake_graph()
+    elif args.assistant == "appointment":
+        import graph_definitions.graph_appointment_making_only
+        importlib.reload(graph_definitions.graph_appointment_making_only)
+        from graph_definitions.graph_appointment_making_only import create_appointment_graph
+        return create_appointment_graph()
+    elif args.assistant == "medication":
+        import graph_definitions.graph_medication_lookup_only
+        importlib.reload(graph_definitions.graph_medication_lookup_only)
+        from graph_definitions.graph_medication_lookup_only import create_medication_lookup_graph
+        return create_medication_lookup_graph()
+    else:
+        raise Exception("We must specify one of the three options for assistant: full, intake or appointment.")
+
+def get_assistant_graph():
+    """Get the assistant graph, using cached version to avoid rebuilding on every request"""
+    global _cached_assistant_graph
+    
+    # Only load the graph once when the module starts/reloads
+    # When uvicorn detects file changes, the entire module reloads and _cached_assistant_graph becomes None again
+    if _cached_assistant_graph is None:
+        _cached_assistant_graph = _load_assistant_graph()
+    
+    return _cached_assistant_graph
+
+# Initialize the assistant graph at startup
+logger.info(f"Initializing {args.assistant} assistant graph at startup...")
+_initial_graph = get_assistant_graph()
+logger.info("Assistant graph initialized successfully")
+
 # create the FastAPI server
-app = FastAPI()
+app = FastAPI() 
 
 # Allow access in browser from RAG UI and Storybook (development)
 origins = ["*"]
@@ -153,26 +185,40 @@ class HealthCheck(BaseModel):
 
 def get_new_thread_id():
     return str(uuid.uuid4())
-thread_id = get_new_thread_id()
 
-langgraph_config = {
-    "configurable": {
-        # Checkpoints are accessed by thread_id
-        "thread_id": thread_id,
+def get_thread_config():
+    """Get thread configuration with optional thread_id. If none provided, generates a new one."""
+    
+    thread_id = get_new_thread_id()
+    logger.info("We have a new thread id : " + thread_id)
+    return {
+        "configurable": {
+            # Checkpoints are accessed by thread_id
+            "thread_id": thread_id,
+        }
     }
-}
 
 def print_event_stream(graph, input_message, thread_config, max_length=1500):
+    logger.warning("Thread id for this request: " + thread_config["configurable"]["thread_id"])
+    
     last_answer = ""
     for event in graph.stream({"messages": [{"role": "user", "content": input_message}]}, thread_config, stream_mode="values"):
         try:
             for value in event.values():
                 try:
                     if isinstance(value, list):
+                        if len(value) == 0:
+                            continue
                         value_messages = value[-1]
                     else:
                         value_messages = value
-                    logger.warning("Agent event: \n\n {}\n".format(value_messages.pretty_repr()))
+                    if hasattr(value_messages, 'pretty_repr'):
+                        logger.warning("Agent event: \n\n {}\n".format(value_messages.pretty_repr()))
+                    else:
+                        logger.warning("Agent event: \n\n {}\n".format(str(value_messages)))
+                        continue
+
+                    
                     if value_messages.type == "ai":
                         if value_messages.content == "" and value_messages.tool_calls:
                             # this is an AI message with tool calls
@@ -199,11 +245,14 @@ def print_event_stream(graph, input_message, thread_config, max_length=1500):
             
     return last_answer
 
+thread_config = get_thread_config()
+logger.info("created thread config with thread id: {}".format(thread_config["configurable"]["thread_id"]))
 def graph_chain(query: str, chat_history: List["Message"], **kwargs) -> Generator[str, None, None]:
         """Execute a Retrieval Augmented Generation chain using the components defined above."""
         
-        logger.info("thread_id {}".format(langgraph_config["configurable"]["thread_id"]))
-        latest_response = print_event_stream(assistant_graph, query, langgraph_config, max_length=1500)
+        logger.info("thread_id {}".format(thread_config["configurable"]["thread_id"]))
+        assistant_graph = get_assistant_graph()  # Get graph instance
+        latest_response = print_event_stream(assistant_graph, query, thread_config, max_length=1500)
         yield latest_response
         
 
@@ -290,4 +339,15 @@ def get_health() -> HealthCheck:
 if __name__ == "__main__":
     
 
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("chain_server:app", 
+                host="0.0.0.0", 
+                port=port, 
+                reload=True, 
+                reload_includes=["*.env", "*.txt", "*.co", "*.yml", "*.py"],
+                reload_excludes=["**/__pycache__/**"],
+                reload_dirs=[
+                    "/app/graph_definitions",
+                    "/app/nmgr-config-store",
+                    "/env_vars",
+                    "/app/chain_server"
+                ])
