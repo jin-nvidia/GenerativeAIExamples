@@ -140,7 +140,7 @@ Run the patient intake only agent.
 ```sh
 # build and run the container, add -d for detaching from logs
 docker compose up --build patient-intake-ui
-# docker compose up --build -d appointment-making-ui
+# docker compose up --build -d patient-intake-ui
 ```
 See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
 
@@ -170,7 +170,6 @@ docker compose up --build appointment-making-ui
 
 See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
 
-
 Next, find the application by going to `http://<your-machine-ip>:7860/appointment-making` in your browser.
 
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `appointment-making-ui` section and replace all mentions of 7860 with your own port number.
@@ -187,8 +186,13 @@ Run the full agent comprising of three specialist agents.
 ```sh
 # build and run the container, add -d for detaching from logs
 docker compose up --build full-agent-ui
-# docker compose up --build -d appointment-making-ui
+# docker compose up --build -d full-agent-uifull-agent-ui
 ```
+
+See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
+
+Next, find the application by going to `http://<your-machine-ip>:7860/full-assistant` in your browser.
+
 
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `full-agent-ui` section and replace all mentions of 7860 with your own port number.
 
@@ -206,27 +210,28 @@ Run the medication lookup only agent.
 ```sh
 # build and run the container, add -d for detaching from logs
 docker compose up --build medication-lookup-ui
-# docker compose up --build -d appointment-making-ui
+# docker compose up --build -d medication-lookup-ui
 ```
+
+See [automatic reloading of Gradio UI application](#automatic-reloading-of-gradio-ui-applications) for how the app reloads after file changes.
+
+Next, find the application by going to `http://<your-machine-ip>:7860/medication-lookup` in your browser.
+
+
 Note this will be running on port 7860 by default. If you need to run on a different port, modify the [`docker-compose.yaml`](./docker-compose.yaml) file's `medication-lookup-ui` section and replace all mentions of 7860 with your own port number.
 
-[Launch the web UI](#25-launch-the-web-ui) on your Chrome browser, you should see the same web interface as above.
 
 To bring down the medication lookup UI:
 ```sh
 docker compose down medication-lookup-ui
 ```
-Next, find the application by going to `http://<your-machine-ip>:7860/medication-lookup` in your browser.
 
 
-##### 2.5 Launch the web UI
-
-Go to your web browser, here we have tested with Google Chrome, and type in `<your machine's ip address>:<port number>`. The port number would be `7860` by default, or your modified port number if you changed the port number in [docker-compose.yaml](./docker-compose.yaml). 
 
 ## Customization
-To customize for your own agentic LLM in LangGraph with your own tools, the [LangGraph tutorial on customer support](https://langchain-ai.github.io/langgraph/tutorials/customer-support/customer-support/) is helpful, where you'll find detailed explanations and steps of creating tools and agentic LLM in LangGraph. Afterwards, you can create your own file similar to the graph files in [`graph_definitions/`](./graph_definitions/) which can connect to the simple text Gradio UI by calling [`launch_demo_ui`](./graph_definitions/graph_patient_intake_only.py#L184), or can be imported by the [chain server](./chain_server/chain_server.py#L31).
+To customize for your own agentic LLM in LangGraph with your own tools, the [LangGraph tutorial on customer support](https://langchain-ai.github.io/langgraph/tutorials/customer-support/customer-support/) is helpful, where you'll find detailed explanations and steps of creating tools and agentic LLM in LangGraph. Afterwards, you can create your own file similar to the graph files in [`graph_definitions/`](./graph_definitions/) which can connect to the simple text Gradio UI, or can be imported by the [chain server](./chain_server/chain_server.py).
 
-### 3. Serving Via FastAPI
+### Serving Via FastAPI
 Serve one of the agents via a FastAPI server for connection to other services.
 
 #### Automatic Reloading of FastAPI Application
